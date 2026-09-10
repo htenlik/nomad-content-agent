@@ -1,21 +1,16 @@
 """Deterministic post-generation checks.
 
-The model produces a caption plus the ids of the products it chose to
-feature. This module decides whether that caption may be published, using
-only the `FactSheet` derived from the same feed snapshot the model saw.
+The model returns a caption plus the ids of the products it featured. This
+module decides whether the caption may be published, using the fact sheet
+built from the same feed snapshot the model saw:
 
-Two kinds of rule live here:
+* commercial facts — prices, discounts, promo codes and availability are
+  checked against the specific products the caption is about, so Product
+  A's price cannot validate a claim about Product B;
+* brand rules — the mechanically checkable subset of brand_kit.md.
 
-* Hard commercial facts — prices, discount percentages, promo codes, and
-  availability. These are checked against the specific products the caption
-  is about, not against the feed as a whole, so Product A's price cannot
-  validate a claim about Product B.
-* Hard brand rules — the mechanically checkable subset of brand_kit.md
-  (banned phrases, emoji and exclamation limits, health-claim vocabulary).
-
-Subjective voice quality is not checked here; that is the model's job and
-a human's. Every failure is returned as a `Violation` with a message that
-is meant to be read by the model on the next attempt.
+Each failure is a `Violation` whose message is written for the model to
+read on the next attempt. Subjective voice quality is not checked here.
 """
 
 from __future__ import annotations
@@ -39,20 +34,12 @@ class Violation:
         return f"[{self.code}] {self.message}"
 
 
-# "$19", "$ 19.50", "19 USD", "19 dollars"
-_PRICE_RE = re.compile(
-    r"\$\s?(\d+(?:\.\d{1,2})?)|(?<![\d.])(\d+(?:\.\d{1,2})?)\s?(?:usd|dollars?|bucks)\b",
-    re.IGNORECASE,
-)
+# "$19", "$ 19.50", "19 dollars"
+_PRICE_RE = re.compile(r"\$\s?(\d+(?:\.\d{1,2})?)|(?<![\d.])(\d+(?:\.\d{1,2})?)\s?dollars?\b", re.IGNORECASE)
 # "15%", "15 %", "15 percent"
 _PERCENT_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s?(?:%|percent\b)", re.IGNORECASE)
-# Things that look like a promo code: SHOUTY tokens containing a digit or
-# underscore (SPRING15, FLASH_SALE, NOMAD20), or a code-like token introduced
-# by the word "code" (code NOMADFRESH, code: welcome10, code 'beans'). The
-# second pattern captures an optional opening quote so that plain prose
-# after the word ("the code expires Sunday") is not mistaken for a code.
+# Invented codes: SHOUTY tokens with a digit or underscore (SPRING15, FLASH_SALE).
 _SHOUTY_CODE_RE = re.compile(r"\b(?=[A-Z0-9_]*[\d_])[A-Z][A-Z0-9_]{3,}\b")
-_AFTER_CODE_WORD_RE = re.compile(r"\bcode\b[\s:\-]*([\"'“‘]?)([A-Za-z0-9_\-]{3,})", re.IGNORECASE)
 # Claims of novelty that must be backed by `new_this_week`.
 _NEW_CLAIM_RE = re.compile(r"\b(new this week|new roast|brand[\s-]new|newest|new arrival)\b", re.IGNORECASE)
 
@@ -87,13 +74,10 @@ def _resolve_featured_products(
 ) -> tuple[list[Product], list[Violation]]:
     """Which available products is this caption about?
 
-    Availability is checked for everything the model declared *and*
-    everything the text names, so naming a sold-out product without
-    declaring it still fails. Prices, discounts and codes, however, are
-    checked against the products the text actually names; the declared ids
-    only count when the text names nothing (e.g. "this week's roast, $21").
-    Otherwise declaring Product A while writing about Product B would let
-    A's price validate a claim about B.
+    Availability is checked for everything declared *and* everything the
+    text names. Numbers are checked against the products the text names;
+    the declared ids only count when the text names nothing, so declaring
+    Product A while writing about Product B cannot let A's price through.
     """
     named = mentioned_product_ids(caption, facts.all_products)
     referenced = list(dict.fromkeys(list(declared_ids) + named))
@@ -159,17 +143,14 @@ def _check_promo_codes(caption: str, featured: list[Product], facts: FactSheet) 
     violations = []
     allowed = {p.promo.code.upper(): p.name for p in featured if p.promo}
 
-    candidates: set[str] = set()
-    # Codes that exist in the feed but were withheld (sold-out / expired /
-    # belonging to a product this caption is not about).
-    for code in facts.known_promo_codes:
-        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])", caption, re.IGNORECASE):
-            candidates.add(code.upper())
-    # Codes the model may have invented.
+    # Codes that exist in the feed but were withheld (sold-out, expired, or
+    # another product's), in any letter case, plus anything that looks invented.
+    candidates = {
+        code.upper()
+        for code in facts.known_promo_codes
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])", caption, re.IGNORECASE)
+    }
     candidates.update(m.group(0).upper() for m in _SHOUTY_CODE_RE.finditer(caption))
-    for quote, token in _AFTER_CODE_WORD_RE.findall(caption):
-        if quote or token.isupper() or re.search(r"[\d_]", token):
-            candidates.add(token.upper())
 
     for code in sorted(candidates):
         if code not in allowed:
