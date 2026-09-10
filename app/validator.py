@@ -26,7 +26,8 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from app.brand import BrandRules
-from app.facts import FactSheet, ProductFacts, mentioned_product_ids, normalize_text
+from app.facts import FactSheet, mentioned_product_ids, normalize_text
+from app.models import Product
 
 
 @dataclass(frozen=True)
@@ -83,7 +84,7 @@ def _resolve_featured_products(
     caption: str,
     declared_ids: Sequence[str],
     facts: FactSheet,
-) -> tuple[list[ProductFacts], list[Violation]]:
+) -> tuple[list[Product], list[Violation]]:
     """Which available products is this caption about?
 
     Availability is checked for everything the model declared *and*
@@ -97,7 +98,7 @@ def _resolve_featured_products(
     named = mentioned_product_ids(caption, facts.all_products)
     referenced = list(dict.fromkeys(list(declared_ids) + named))
     fact_scope = set(named) if named else set(declared_ids)
-    featured: list[ProductFacts] = []
+    featured: list[Product] = []
     violations: list[Violation] = []
     for product_id in referenced:
         available = facts.get_available(product_id)
@@ -122,7 +123,7 @@ def _resolve_featured_products(
 # --- commercial facts ------------------------------------------------------
 
 
-def _check_prices(caption: str, featured: list[ProductFacts]) -> list[Violation]:
+def _check_prices(caption: str, featured: list[Product]) -> list[Violation]:
     violations = []
     allowed = {p.price_usd: p.name for p in featured}
     for match in _PRICE_RE.finditer(caption):
@@ -132,15 +133,15 @@ def _check_prices(caption: str, featured: list[ProductFacts]) -> list[Violation]
                 Violation(
                     "unsupported_price",
                     f"'{match.group(0).strip()}' is not the price of any product featured in this caption. "
-                    + _allowed_summary({f"${_fmt(v)}": n for v, n in allowed.items()}),
+                    + _allowed_summary({f"${v}": n for v, n in allowed.items()}),
                 )
             )
     return violations
 
 
-def _check_discounts(caption: str, featured: list[ProductFacts]) -> list[Violation]:
+def _check_discounts(caption: str, featured: list[Product]) -> list[Violation]:
     violations = []
-    allowed = {float(p.promo.discount_percent): p.name for p in featured if p.promo and p.promo.discount_percent}
+    allowed = {p.promo.discount_percent: p.name for p in featured if p.promo and p.promo.discount_percent}
     for match in _PERCENT_RE.finditer(caption):
         value = float(match.group(1))
         if value not in allowed:
@@ -148,13 +149,13 @@ def _check_discounts(caption: str, featured: list[ProductFacts]) -> list[Violati
                 Violation(
                     "unsupported_discount",
                     f"'{match.group(0).strip()}' is not an active discount for any product featured in this caption. "
-                    + _allowed_summary({f"{_fmt(v)}%": n for v, n in allowed.items()}),
+                    + _allowed_summary({f"{v}%": n for v, n in allowed.items()}),
                 )
             )
     return violations
 
 
-def _check_promo_codes(caption: str, featured: list[ProductFacts], facts: FactSheet) -> list[Violation]:
+def _check_promo_codes(caption: str, featured: list[Product], facts: FactSheet) -> list[Violation]:
     violations = []
     allowed = {p.promo.code.upper(): p.name for p in featured if p.promo}
 
@@ -182,7 +183,7 @@ def _check_promo_codes(caption: str, featured: list[ProductFacts], facts: FactSh
     return violations
 
 
-def _check_new_claims(caption: str, featured: list[ProductFacts]) -> list[Violation]:
+def _check_new_claims(caption: str, featured: list[Product]) -> list[Violation]:
     match = _NEW_CLAIM_RE.search(caption)
     if match and not any(p.new_this_week for p in featured):
         return [
@@ -250,7 +251,3 @@ def _allowed_summary(allowed: dict[str, str]) -> str:
     if not allowed:
         return "Nothing of this kind is allowed for the featured products; remove it."
     return "Allowed: " + ", ".join(f"{value} ({name})" for value, name in allowed.items()) + "."
-
-
-def _fmt(value: float) -> str:
-    return str(int(value)) if float(value).is_integer() else str(value)

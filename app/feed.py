@@ -102,7 +102,7 @@ def _parse_product(item: Any, where: str) -> Product:
         origin=_require_str(item, "origin", where),
         roast_level=_require_str(item, "roast_level", where),
         tasting_notes=_require_str(item, "tasting_notes", where),
-        price_usd=float(price),
+        price_usd=price,
         stock_status=_require_str(item, "stock_status", where),
         units_left=units,
         new_this_week=new_this_week,
@@ -123,7 +123,6 @@ def _parse_promo(item: dict[str, Any], where: str) -> Promotion | None:
             raise FeedError(f"{where}: 'promo_discount_percent' must be null or a number, got {discount!r}")
         if not 0 < discount <= 100:
             raise FeedError(f"{where}: 'promo_discount_percent' must be between 0 and 100, got {discount!r}")
-        discount = int(discount) if float(discount).is_integer() else discount
 
     expires_raw = item["promo_expires"]
     expires: date | None = None

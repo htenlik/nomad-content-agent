@@ -21,8 +21,8 @@ class SuppliedSnapshots(unittest.TestCase):
         self.assertEqual({p.id for p in week2.unavailable}, {"peru-cajamarca", "guatemala-huehue"})
 
     def test_new_this_week_differs_between_snapshots(self):
-        new1 = [p.id for p in build_fact_sheet(load_feed(WEEK1)).new_this_week]
-        new2 = [p.id for p in build_fact_sheet(load_feed(WEEK2)).new_this_week]
+        new1 = [p.id for p in build_fact_sheet(load_feed(WEEK1)).available if p.new_this_week]
+        new2 = [p.id for p in build_fact_sheet(load_feed(WEEK2)).available if p.new_this_week]
         self.assertEqual(new1, ["ethiopia-guji"])
         self.assertEqual(new2, ["costa-rica-tarrazu"])
 
