@@ -120,12 +120,10 @@ class BriefPreflight(unittest.TestCase):
 
 class ResponseParsing(unittest.TestCase):
     def test_parses_plain_json(self):
-        caption, ids, problem = parse_model_response(model_json("hi", "a", "b"))
-        self.assertEqual((caption, ids, problem), ("hi", ["a", "b"], None))
+        self.assertEqual(parse_model_response(model_json("hi", "a", "b")), ("hi", ["a", "b"]))
 
-    def test_reports_problems(self):
-        self.assertIsNotNone(parse_model_response("no json here")[2])
-        self.assertIsNotNone(parse_model_response("{bad json}")[2])
-        self.assertIsNotNone(parse_model_response(json.dumps({"caption": ""}))[2])
-        self.assertIsNotNone(parse_model_response(json.dumps({"caption": "x", "featured_product_ids": "a"}))[2])
-        self.assertIsNotNone(parse_model_response("[1, 2]")[2])
+    def test_rejects_malformed_responses(self):
+        for raw in ("no json here", "{bad json}", json.dumps({"caption": ""}),
+                    json.dumps({"caption": "x", "featured_product_ids": "a"}), "[1, 2]"):
+            with self.assertRaises(ValueError, msg=raw):
+                parse_model_response(raw)

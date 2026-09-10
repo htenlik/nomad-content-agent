@@ -23,8 +23,8 @@ from app.feed import FeedError, load_feed
 from app.llm import LLMConfig, LLMError, OpenAICompatibleClient
 from app.prompts import build_system_prompt, build_user_prompt
 
-DEFAULT_BRAND_KIT = Path("data/brand_kit.md")
-DEFAULT_BRAND_RULES = Path("data/brand_rules.json")
+BRAND_KIT = Path("data/brand_kit.md")
+BRAND_RULES = Path("data/brand_rules.json")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,8 +34,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--feed", required=True, help="Path to the current promotions/inventory feed JSON.")
     parser.add_argument("--brief", required=True, help='Content brief, e.g. "Announce this week\'s new roast."')
-    parser.add_argument("--brand-kit", default=DEFAULT_BRAND_KIT, help="Path to the brand voice guide (markdown).")
-    parser.add_argument("--brand-rules", default=DEFAULT_BRAND_RULES, help="Path to the machine-checkable brand rules JSON.")
     parser.add_argument(
         "--as-of",
         type=date.fromisoformat,
@@ -55,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         feed = load_feed(args.feed)
-        brand = load_brand(args.brand_kit, args.brand_rules)
+        brand = load_brand(BRAND_KIT, BRAND_RULES)
     except (FeedError, BrandError) as exc:
         return fail(str(exc))
 

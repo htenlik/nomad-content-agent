@@ -53,28 +53,12 @@ def load_brand_rules(rules_path: str | Path) -> BrandRules:
         raise BrandError(f"Brand rules file not found: {rules_path}")
     try:
         raw = json.loads(rules_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise BrandError(f"Brand rules file {rules_path} is not valid JSON: {exc}") from exc
-
-    try:
         return BrandRules(
-            banned_phrases=_str_tuple(raw["banned_phrases"], "banned_phrases"),
-            health_claim_terms=_str_tuple(raw["health_claim_terms"], "health_claim_terms"),
-            max_emoji=_non_negative_int(raw["max_emoji"], "max_emoji"),
-            max_exclamation_marks=_non_negative_int(raw["max_exclamation_marks"], "max_exclamation_marks"),
-            max_characters=_non_negative_int(raw["max_characters"], "max_characters"),
+            banned_phrases=tuple(raw["banned_phrases"]),
+            health_claim_terms=tuple(raw["health_claim_terms"]),
+            max_emoji=int(raw["max_emoji"]),
+            max_exclamation_marks=int(raw["max_exclamation_marks"]),
+            max_characters=int(raw["max_characters"]),
         )
-    except KeyError as exc:
-        raise BrandError(f"Brand rules file {rules_path} is missing key {exc}") from exc
-
-
-def _str_tuple(value: object, key: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
-        raise BrandError(f"Brand rule '{key}' must be a list of non-empty strings")
-    return tuple(v.strip() for v in value)
-
-
-def _non_negative_int(value: object, key: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise BrandError(f"Brand rule '{key}' must be a non-negative integer")
-    return value
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise BrandError(f"Brand rules file {rules_path} is malformed: {exc!r}") from exc

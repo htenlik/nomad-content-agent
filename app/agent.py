@@ -1,14 +1,13 @@
 """Orchestration: brief + brand + feed -> validated caption.
 
     brief
-      -> build FactSheet from the feed (deterministic)
+      -> build the fact sheet from the feed (deterministic)
       -> refuse early if the brief only asks about sold-out products
       -> ask the model for {featured_product_ids, caption}
       -> validate deterministically
       -> return, or retry with the violations as feedback, or fail
 
-The retry loop is bounded (`max_attempts`). Nothing that fails validation
-is ever returned as a caption.
+Nothing that fails validation is ever returned as a caption.
 """
 
 from __future__ import annotations
@@ -41,19 +40,18 @@ class CaptionRefused(Exception):
 class Attempt:
     raw_response: str
     caption: str | None
-    declared_product_ids: list[str]
     violations: list[Violation]
 
 
 class CaptionGenerationError(Exception):
-    """Every attempt failed validation (or was unparseable)."""
+    """Every attempt failed validation (or could not be parsed)."""
 
     def __init__(self, attempts: list[Attempt]):
-        last = attempts[-1] if attempts else None
-        summary = "; ".join(str(v) for v in last.violations) if last else "no attempts were made"
-        message = f"No valid caption after {len(attempts)} attempt(s). Last problems: {summary}"
-        if last is not None and last.caption is None:
-            # The response could not be parsed at all; show what came back.
+        last = attempts[-1]
+        message = f"No valid caption after {len(attempts)} attempt(s). Last problems: " + "; ".join(
+            str(v) for v in last.violations
+        )
+        if last.caption is None:
             message += f" Raw response began: {last.raw_response[:300]!r}"
         super().__init__(message)
         self.attempts = attempts
@@ -63,7 +61,6 @@ class CaptionGenerationError(Exception):
 class CaptionResult:
     caption: str
     featured_product_ids: list[str]
-    facts: FactSheet
     attempts: list[Attempt] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -91,22 +88,18 @@ def generate_caption(
 
     for _ in range(max_attempts):
         raw = llm.complete(system_prompt, build_user_prompt(facts, brief, corrections))
-        caption, declared_ids, parse_problem = parse_model_response(raw)
-        if parse_problem is not None:
-            violations = [Violation("bad_response_format", parse_problem)]
+        try:
+            caption, declared_ids = parse_model_response(raw)
+        except ValueError as exc:
+            caption, declared_ids, violations = None, [], [Violation("bad_response_format", str(exc))]
         else:
-            violations = validate_caption(caption or "", declared_ids, facts, brand.rules)
+            violations = validate_caption(caption, declared_ids, facts, brand.rules)
 
-        attempts.append(Attempt(raw, caption, declared_ids, violations))
+        attempts.append(Attempt(raw, caption, violations))
         if not violations:
             assert caption is not None
-            return CaptionResult(
-                caption=caption,
-                featured_product_ids=_featured_ids(caption, declared_ids, facts),
-                facts=facts,
-                attempts=attempts,
-                notes=notes,
-            )
+            featured = dict.fromkeys(declared_ids + mentioned_product_ids(caption, facts.all_products))
+            return CaptionResult(caption, list(featured), attempts, notes)
         corrections = [v.message for v in violations]
 
     raise CaptionGenerationError(attempts)
@@ -116,9 +109,8 @@ def check_brief_against_facts(brief: str, facts: FactSheet) -> list[str]:
     """Deterministic pre-flight. Raises `CaptionRefused` when unsafe.
 
     If the brief names products and every one of them is unavailable, there
-    is nothing honest to write, so we stop before spending a model call.
-    If it names a mix, the unavailable ones are dropped and a note records
-    that, so the caller knows the caption is narrower than the brief.
+    is nothing honest to write, so stop before spending a model call. If it
+    names a mix, drop the unavailable ones and say so in a note.
     """
     if not facts.available:
         raise CaptionRefused(
@@ -148,31 +140,26 @@ def check_brief_against_facts(brief: str, facts: FactSheet) -> list[str]:
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def parse_model_response(raw: str) -> tuple[str | None, list[str], str | None]:
-    """Extract (caption, declared ids, problem). `problem` is None on success.
+def parse_model_response(raw: str) -> tuple[str, list[str]]:
+    """Extract (caption, declared product ids); raise ValueError if malformed.
 
     Tolerates code fences and stray text around the JSON object, because
     small models do that, but does not try to rescue anything less.
     """
     match = _JSON_OBJECT_RE.search(raw or "")
     if not match:
-        return None, [], "Response did not contain a JSON object."
+        raise ValueError("Response did not contain a JSON object.")
     try:
         data = json.loads(match.group(0))
     except json.JSONDecodeError as exc:
-        return None, [], f"Response was not valid JSON: {exc}."
+        raise ValueError(f"Response was not valid JSON: {exc}.") from exc
     if not isinstance(data, dict):
-        return None, [], "Response JSON was not an object."
+        raise ValueError("Response JSON was not an object.")
 
     caption = data.get("caption")
     if not isinstance(caption, str) or not caption.strip():
-        return None, [], "Response JSON has no non-empty 'caption' string."
-
+        raise ValueError("Response JSON has no non-empty 'caption' string.")
     ids = data.get("featured_product_ids", [])
     if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
-        return caption.strip(), [], "'featured_product_ids' must be a list of product id strings."
-    return caption.strip(), ids, None
-
-
-def _featured_ids(caption: str, declared_ids: list[str], facts: FactSheet) -> list[str]:
-    return list(dict.fromkeys(list(declared_ids) + mentioned_product_ids(caption, facts.all_products)))
+        raise ValueError("'featured_product_ids' must be a list of product id strings.")
+    return caption.strip(), ids
