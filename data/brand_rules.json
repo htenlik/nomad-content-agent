@@ -1,0 +1,28 @@
+{
+  "_note": "Machine-checkable subset of brand_kit.md. The prose voice guide stays the source of truth for tone; this file only lists the rules that can be enforced deterministically by app/validator.py. Update the two files together.",
+  "banned_phrases": [
+    "revolutionary",
+    "life-changing",
+    "game-changing",
+    "elevate your routine",
+    "don't miss out",
+    "incredible opportunity"
+  ],
+  "health_claim_terms": [
+    "energy",
+    "energize",
+    "focus",
+    "metabolism",
+    "antioxidant",
+    "antioxidants",
+    "healthy",
+    "health",
+    "immune",
+    "detox",
+    "weight loss",
+    "productivity"
+  ],
+  "max_emoji": 1,
+  "max_exclamation_marks": 1,
+  "max_characters": 700
+}

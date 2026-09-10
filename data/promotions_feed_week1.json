@@ -1,0 +1,90 @@
+{
+  "feed_note": "Snapshot 1 of 2 — see promotions_feed_week2.json for the following week's version of this same feed. In production this is regenerated daily/weekly; design your agent to read it fresh each time, not to have today's values baked into a prompt.",
+  "snapshot_taken_at": "2026-09-08T06:00:00+03:00",
+  "products": [
+    {
+      "id": "peru-cajamarca",
+      "name": "Peru — Cajamarca",
+      "origin": "Cajamarca, Peru",
+      "roast_level": "Light-medium",
+      "tasting_notes": "Bright, stone fruit, a little funky",
+      "price_usd": 19,
+      "stock_status": "low_stock",
+      "units_left": 14,
+      "promo_code": null,
+      "promo_discount_percent": null,
+      "promo_expires": null,
+      "new_this_week": false
+    },
+    {
+      "id": "ethiopia-guji",
+      "name": "Ethiopia — Guji (Washed)",
+      "origin": "Guji, Ethiopia",
+      "roast_level": "Light",
+      "tasting_notes": "Jasmine, clean dry finish",
+      "price_usd": 21,
+      "stock_status": "in_stock",
+      "units_left": 132,
+      "promo_code": "GUJI15",
+      "promo_discount_percent": 15,
+      "promo_expires": "2026-09-14",
+      "new_this_week": true
+    },
+    {
+      "id": "colombia-huila",
+      "name": "Colombia — Huila",
+      "origin": "Huila, Colombia",
+      "roast_level": "Medium",
+      "tasting_notes": "Caramel, red apple, balanced",
+      "price_usd": 18,
+      "stock_status": "in_stock",
+      "units_left": 268,
+      "promo_code": null,
+      "promo_discount_percent": null,
+      "promo_expires": null,
+      "new_this_week": false
+    },
+    {
+      "id": "kenya-nyeri",
+      "name": "Kenya — Nyeri",
+      "origin": "Nyeri, Kenya",
+      "roast_level": "Light-medium",
+      "tasting_notes": "Blackcurrant, tomato, winey acidity",
+      "price_usd": 22,
+      "stock_status": "sold_out",
+      "units_left": 0,
+      "promo_code": "NYERI10",
+      "promo_discount_percent": 10,
+      "promo_expires": "2026-09-10",
+      "new_this_week": false
+    },
+    {
+      "id": "brazil-mogiana",
+      "name": "Brazil — Mogiana",
+      "origin": "Mogiana, Brazil",
+      "roast_level": "Medium-dark",
+      "tasting_notes": "Chocolate, hazelnut, low acidity",
+      "price_usd": 17,
+      "stock_status": "in_stock",
+      "units_left": 190,
+      "promo_code": null,
+      "promo_discount_percent": null,
+      "promo_expires": null,
+      "new_this_week": false
+    },
+    {
+      "id": "guatemala-huehue",
+      "name": "Guatemala — Huehuetenango",
+      "origin": "Huehuetenango, Guatemala",
+      "roast_level": "Medium",
+      "tasting_notes": "Plum, cocoa nib, soft acidity",
+      "price_usd": 19,
+      "stock_status": "in_stock",
+      "units_left": 77,
+      "promo_code": "HUEHUE20",
+      "promo_discount_percent": 20,
+      "promo_expires": "2026-09-11",
+      "new_this_week": false
+    }
+  ]
+}
