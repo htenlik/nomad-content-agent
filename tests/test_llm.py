@@ -5,7 +5,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from app.llm import LLMConfig, LLMConfigError, LLMError, OpenAICompatibleClient
+from app.llm import MAX_RETRIES, LLMConfig, LLMError, OpenAICompatibleClient
 
 
 class StubEndpoint:
@@ -51,17 +51,17 @@ class StubEndpoint:
 
 class Config(unittest.TestCase):
     def test_missing_key_is_a_config_error(self):
-        with self.assertRaises(LLMConfigError):
+        with self.assertRaises(LLMError):
             LLMConfig.from_env({})
 
     def test_env_values_are_read_and_defaults_applied(self):
-        config = LLMConfig.from_env({"LLM_API_KEY": "k", "LLM_BASE_URL": "http://x/v1/", "LLM_TEMPERATURE": "0.1"})
+        config = LLMConfig.from_env({"LLM_API_KEY": "k", "LLM_BASE_URL": "http://x/v1/", "LLM_MAX_TOKENS": "512"})
         self.assertEqual(config.base_url, "http://x/v1")
-        self.assertEqual(config.temperature, 0.1)
-        self.assertEqual(config.model, "gpt-4o-mini")
+        self.assertEqual(config.max_tokens, 512)
+        self.assertEqual(config.model, "gemini-3.6-flash")
 
     def test_bad_numeric_setting(self):
-        with self.assertRaises(LLMConfigError):
+        with self.assertRaises(LLMError):
             LLMConfig.from_env({"LLM_API_KEY": "k", "LLM_MAX_TOKENS": "lots"})
 
 
@@ -85,23 +85,21 @@ class Client(unittest.TestCase):
     def test_rate_limit_is_retried_then_succeeds(self):
         ok = {"choices": [{"message": {"content": "hello"}}]}
         with StubEndpoint(responses=[(429, {"error": "slow down"}), (503, {"error": "busy"}), (200, ok)]) as stub:
-            client = OpenAICompatibleClient(LLMConfig(api_key="x", base_url=stub.base_url, retry_base_delay_seconds=0))
+            client = OpenAICompatibleClient(LLMConfig(api_key="x", base_url=stub.base_url, retry_delay_seconds=0))
             self.assertEqual(client.complete("s", "u"), "hello")
         self.assertEqual(len(stub.requests), 3)
 
     def test_rate_limit_gives_up_after_max_retries(self):
         with StubEndpoint(status=429, body={"error": "slow down"}) as stub:
-            client = OpenAICompatibleClient(
-                LLMConfig(api_key="x", base_url=stub.base_url, max_retries=2, retry_base_delay_seconds=0)
-            )
+            client = OpenAICompatibleClient(LLMConfig(api_key="x", base_url=stub.base_url, retry_delay_seconds=0))
             with self.assertRaises(LLMError) as ctx:
                 client.complete("s", "u")
-        self.assertEqual(len(stub.requests), 3)
+        self.assertEqual(len(stub.requests), MAX_RETRIES + 1)
         self.assertIn("429", str(ctx.exception))
 
     def test_client_errors_are_not_retried(self):
         with StubEndpoint(status=400, body={"error": "bad request"}) as stub:
-            client = OpenAICompatibleClient(LLMConfig(api_key="x", base_url=stub.base_url, retry_base_delay_seconds=0))
+            client = OpenAICompatibleClient(LLMConfig(api_key="x", base_url=stub.base_url, retry_delay_seconds=0))
             with self.assertRaises(LLMError):
                 client.complete("s", "u")
         self.assertEqual(len(stub.requests), 1)

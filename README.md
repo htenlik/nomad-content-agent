@@ -91,16 +91,11 @@ pip install -r requirements.txt    # optional: only installs pytest
 cp .env.example .env               # then put a real key in .env
 ```
 
-`.env` is git-ignored and loaded by `main.py`. Any OpenAI-compatible
-chat-completions endpoint works; `.env.example` lists settings for OpenAI,
-Anthropic, Gemini, Groq and Ollama. The variables are:
-
-| Variable | Required | Default |
-|---|---|---|
-| `LLM_API_KEY` | yes | — |
-| `LLM_BASE_URL` | no | `https://api.openai.com/v1` |
-| `LLM_MODEL` | no | `gpt-4o-mini` |
-| `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | no | `0.4` / `2048` / `60` / `3` |
+`.env` is git-ignored and loaded by `main.py`. The examples below were
+generated with Gemini (`gemini-3.6-flash`) through its OpenAI-compatible
+endpoint, which is the default; any endpoint that speaks the OpenAI
+chat-completions format works by setting `LLM_BASE_URL` and `LLM_MODEL`.
+Only `LLM_API_KEY` is required.
 
 ## Running
 
@@ -127,11 +122,11 @@ caption after retries), `2` brief refused for safety.
 Failure behaviour: a draft that fails validation is sent back to the model
 with the specific violations, up to `--max-attempts` times; then the run
 fails and prints the last violations (and the raw response, if it could not
-be parsed). HTTP 429/5xx from the provider are retried up to
-`LLM_MAX_RETRIES` times with a growing delay (honouring `Retry-After`), which
-matters on free tiers with per-minute quotas. An empty model response — the
-usual symptom of a reasoning model spending its whole token budget on
-thinking — is reported as such with a pointer to `LLM_MAX_TOKENS`.
+be parsed). HTTP 429/5xx from the provider are retried three times with a
+growing delay, which matters on free tiers with per-minute quotas. An empty
+model response — the usual symptom of a reasoning model spending its whole
+token budget on thinking — is reported as such with a pointer to
+`LLM_MAX_TOKENS`.
 
 ## Testing
 

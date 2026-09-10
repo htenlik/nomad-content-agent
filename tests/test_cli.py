@@ -67,7 +67,7 @@ class SafetyAndErrors(unittest.TestCase):
     def test_unreachable_endpoint_fails_cleanly(self):
         proc = run_cli(
             "--feed", str(WEEK1), "--brief", "Announce this week's new roast.",
-            env_overrides={"LLM_API_KEY": "test", "LLM_BASE_URL": "http://127.0.0.1:9", "LLM_TIMEOUT_SECONDS": "3"},
+            env_overrides={"LLM_API_KEY": "test", "LLM_BASE_URL": "http://127.0.0.1:9"},
         )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("Could not reach", proc.stderr)
