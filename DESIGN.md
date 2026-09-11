@@ -1,67 +1,55 @@
-# Design write-up: decisions, trade-offs, and what I would do differently
+# Design write-up
 
-**The shape of the problem.** A caption has two kinds of content: the words,
-which should sound like Nomad Roasters, and the facts, which must match a
-feed that changes every week. An LLM is the right tool for the first and the
-wrong tool for the second, so the design is a thin LLM call wrapped on both
-sides by ordinary Python. The feed is reduced to a fact sheet *before* the
-model sees anything, and the caption is checked against that same fact sheet
-*after*. The feed, not the model, is the source of truth for every number.
+**What I built.** A small Python program that turns a one-line brief and
+the current promotions feed into one Instagram caption. The model only
+writes the words; every commercial fact is filtered before the call and
+checked after it by ordinary code. `feed.py` loads the feed and works out
+what may be promoted, `agent.py` builds the prompt and runs the
+generate → validate → retry loop, `validator.py` holds the checks, and
+`llm.py` makes the API call.
 
-**Why the brand and the feed stay apart.** They change on different clocks
-and are owned by different people. `brand_kit.md` is given to the model
-verbatim — it is prose, and paraphrasing it into Python strings would just
-create a second, drifting copy. `brand_rules.json` next to it holds the few
-rules a program can enforce (banned phrases, emoji and exclamation limits,
-health-claim words). The feed goes through `feed.py` → `facts.py` and is
-injected as a labelled JSON block. Nothing in the brand path reads product
-data, nothing in the feed path reads voice rules, and a test greps the
-application code for fixture-specific names so the demo can't quietly
-depend on week 1.
+**Why the brand guide and the feed stay separate.** They change at
+different rates and for different reasons. The brand kit is prose, so I
+give it to the model as-is instead of copying it into Python strings that
+would drift from the original; the only brand rules in code are the four
+explicit "don't" items that a program can check. The feed is data, so it is
+parsed, filtered and inserted as a labelled block. A test fails if any
+product name from the sample feeds appears in application code, which is
+how I made sure week 2 works without touching the source.
 
-**Why validation is association-aware.** Allow-listing every number in the
-feed would accept "Colombia Huila, $21" because $21 is *someone's* price.
-Instead the model returns `{featured_product_ids, caption}`, the validator
-works out which products the text names, checks that all of them are
-available, and requires every `$`, `%` and code-like token to belong to one
-of *those* products. Sold-out products contribute nothing to the allow-list
-and their codes are withheld from the prompt, so a valid-looking
-`HUEHUE_FLASH` on a sold-out bag can't get in from the front and is rejected
-from the back.
+**Why I validate outside the model.** Telling a model not to invent a
+price is not a guarantee. So I do two cheaper, certain things. Before the
+call, the model only sees prices and promos for products that are actually
+sellable; sold-out products are listed by name only, so a code like
+`HUEHUE_FLASH` on a sold-out bag never enters the prompt. After the call,
+regexes pull every `$`, `%` and code-like token out of the caption and each
+one must belong to the product the caption names — a real price attached
+to the wrong product is rejected, not just an invented one. Failures go
+back to the model as corrections, three times at most, and then the run
+fails rather than publishing.
 
-**What I kept deliberately simple.** No framework, no vector store, no
-database: a handful of products fit in a prompt, and retrieval would only add
-a way to retrieve the wrong week. No SDK — one `urllib` POST to an
-OpenAI-compatible endpoint keeps the dependency list empty. Retry is a
-three-iteration loop that feeds the violation messages back as corrections;
-after that the run fails with the reasons rather than publishing. Briefs that
-only ask about sold-out products are refused before the model call rather
-than redirected, because a marketer who asked for a specific product is
-better served by "that's sold out, here's what you can post" than by a
-caption about something else. Promo expiry is judged against the snapshot's
-own date so archived fixtures don't rot as the calendar moves.
+**The main trade-off.** I used simple text matching instead of anything
+that understands English. It catches the things that matter for this
+workflow (formatted numbers, promo codes, product names, adjective forms
+like "Kenyan"), and it is honest about what it can't catch: "nineteen
+dollars", a two-product caption with swapped prices, or a sold-out product
+referred to only as "the washed one". I preferred a short list of known
+gaps to a heuristic engine I couldn't fully explain. In the same spirit,
+any percentage is treated as a discount, so "100% compostable" gets
+rewritten — a false positive I accept.
 
-**Trade-offs and limitations.** Regex sees "$19" and "15%" but not
-"nineteen dollars"; the prompt asks for plainly formatted numbers, and the
-dangerous case (a number the model *did* format) is the one the checks are
-good at. Product association is per caption, not per sentence, so a
-two-product caption with swapped prices would pass; the prompt asks for one
-product per caption, which makes attribution exact in the normal case. Any
-percentage is read as a discount, so "100% compostable" gets rejected and
-rewritten — I preferred that false positive to the false negative. Name
-matching is keyword-based and would miss "the washed one". Voice is enforced
-only where it is mechanical; tone is left to the model and to review. The
-first live run also taught me two practical things that ended up in the
-client: a reasoning model needs a bigger token budget than the caption
-itself, and free tiers hand out 429s, so there is a small bounded retry.
+**Other decisions.** A brief that only asks about a sold-out product is
+refused with the available alternatives, rather than quietly answered with
+a different coffee. Promo expiry is judged against the feed's own snapshot
+date so the archived week-1 file keeps meaning what it meant that week.
+The client is one `urllib` POST with a small retry, because the free tier
+answers with 429 a few times a minute, and a generous token budget, because
+the model I used spends hidden reasoning tokens before the caption.
 
-**With more time.** First, an evaluation harness: a fixed set of briefs ×
-snapshots re-run on every prompt or model change, with the validator's
-rejection rate tracked and an LLM judge scoring tone against a rubric from
-the brand kit, plus a small human sample. Second, structured generation —
-ask the model for `{product_id, mention_price, mention_promo, sentences}`
-and have the code render the numbers itself, which removes the regex layer
-for the common case. Third, sentence-level attribution for multi-product
-captions. A production version would also need a real runtime date policy
-for promo expiry, per-platform overlays on the brand kit (length, hashtags),
-and logging of every attempt and violation for auditing.
+**With more time.** A regression set of briefs × snapshots that runs on
+every prompt or model change, with the validator's rejection rate tracked
+and a second model scoring tone against a rubric from the brand kit.
+Sentence-level attribution so two-product captions are checked properly.
+And structured generation — have the model return the product id and
+which facts to mention, and let the code render the numbers itself — which
+would remove most of the regex layer.
