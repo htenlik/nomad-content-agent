@@ -1,106 +1,77 @@
 # Nomad Roasters — Content Agent
 
-Take-home for the VisionBridge internship. Give the agent a one-line brief
-("announce this week's new roast") and the current promotions feed; it
-returns one Instagram caption in the Nomad Roasters voice that only states
-prices, discounts, promo codes and availability that exist in that feed.
-
-The LLM writes the words. Plain Python decides what is true.
+Take-home for the VisionBridge internship. You give the agent a short brief
+("announce this week's new roast") and the current promotions feed, and it
+writes one Instagram caption in the Nomad Roasters voice. The caption can
+only use prices, discounts, promo codes and availability that are in that
+week's feed — the model writes the words, ordinary Python checks the facts.
 
 ## How it works
 
-The brand guide (`data/brand_kit.md`, rarely changes) and the promotions
-feed (`--feed`, changes weekly) never meet in code. The feed is first
-reduced to a **fact sheet**: products that are actually sellable
-(`in_stock`/`low_stock` *and* `units_left > 0`) with their price and any
-promotion still active on the snapshot date, plus sold-out products by name
-only — their prices and promo codes are withheld, so the model never sees
-`HUEHUE_FLASH` on a sold-out bag. The model gets the brand guide verbatim,
-the fact sheet as JSON, and the brief, each in its own labelled block, and
-returns `{"featured_product_ids": [...], "caption": "..."}`.
-
-The caption is then checked by ordinary code against the same fact sheet:
-every `$` price, `%` and promo-code-looking token must belong to a product
-the caption names; no sold-out product may be named; "new roast"/"new this
-week" wording needs `new_this_week`; and the checkable brand rules apply
-(banned phrases, health-claim words, at most one emoji and one exclamation
-mark, caption length). Violations go back to the model as corrections, up
-to three attempts, after which the run fails instead of returning bad copy.
-If the brief only asks about sold-out products, the agent refuses before
-calling the model at all.
-
-```
-brief ─┐   data/brand_kit.md + brand_rules.json  (durable)
-       │   --feed X.json ─► feed.py ─► facts.py ─► fact sheet (available / sold-out, active promos)
-       ├───────────────────────────────────┤ brief only about sold-out products? ─► refuse (exit 2)
-       ▼                                   ▼
-   prompts.py: INSTRUCTIONS | BRAND CONTEXT | CURRENT FACTS | CONTENT BRIEF ─► llm.py
-                                           │
-                                    validator.py ─► violations? ─► retry with corrections (≤3)
-                                           │                             │
-                                        caption                     fail safely
-```
+1. Load the brand guide (`data/brand_kit.md`). It rarely changes.
+2. Load the weekly feed (`--feed`). It changes every week, so nothing from
+   it is hard-coded anywhere.
+3. Build a "fact sheet": products that can actually be sold (`in_stock` or
+   `low_stock` **and** `units_left > 0`) with their price and any promo that
+   hasn't expired. Sold-out products appear by name only, on a "do not
+   mention" list — their prices and promo codes are never shown to the
+   model, so a sold-out product with a live-looking code stays invisible.
+4. If the brief only asks about sold-out products, stop here and say so
+   (exit code 2). No model call.
+5. Send the model the brand guide, the fact sheet as JSON, the brief and a
+   short list of rules. It answers with JSON: the caption plus the ids of
+   the products it wrote about.
+6. Check the caption with plain code: every `$` price, `%` discount and
+   promo-code-looking token must belong to the product the caption names;
+   no sold-out product may be named; "new roast" wording needs
+   `new_this_week`; plus the brand kit's mechanical rules (banned phrases,
+   no health claims, at most one emoji and one exclamation mark).
+7. If anything fails, send the reasons back to the model and try again, up
+   to three times. If it still fails, the run errors instead of printing a
+   bad caption.
 
 ```
-main.py                  CLI: arguments, exit codes, .env loading
-app/models.py            Product / Promotion / Feed dataclasses and the availability rule
-app/feed.py              JSON loading with strict field checks
-app/facts.py             Fact sheet (available vs sold-out, promo expiry) and product-name matching
-app/brand.py             Loads brand_kit.md and brand_rules.json
-app/prompts.py           Assembles the four-part prompt
-app/llm.py               Small client for an OpenAI-compatible chat endpoint (stdlib urllib)
-app/validator.py         Deterministic post-generation checks
-app/agent.py             Pre-flight refusal, generate, validate, bounded retry
-data/                    Supplied brand kit and both feed snapshots, plus brand_rules.json
-scripts/run_examples.py  Runs the example briefs below and prints them as markdown
-tests/                   unittest suite (also runs under pytest)
-DESIGN.md                One-page design write-up
+main.py           command line: --feed, --brief, --dry-run
+app/feed.py       load the feed; decide what is available; build the fact sheet
+app/llm.py        one call to an OpenAI-compatible chat endpoint (stdlib only)
+app/validator.py  the deterministic checks, plus product-name matching
+app/agent.py      prompt, generate → validate → retry loop, sold-out refusal
+data/             brand kit and the two feed snapshots
+scripts/run_examples.py   reproduces the examples below
+tests/            unittest suite
+DESIGN.md         one-page write-up
 ```
-
-`brand_rules.json` is the machine-checkable subset of the brand kit (banned
-phrases, limits). The prose kit stays the source of truth for tone.
 
 ## Setup and running
 
-Python 3.10+, standard library only (pytest is optional).
+Python 3.10+, no third-party packages (pytest optional).
 
 ```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-cp .env.example .env                                # put your API key in .env
+cp .env.example .env      # put your API key in it
 python main.py --feed data/promotions_feed_week1.json --brief "Announce this week's new roast."
 python main.py --feed data/promotions_feed_week2.json --brief "Announce this week's new roast."
 ```
 
-`.env` is git-ignored. The examples below were generated with Gemini
-(`gemini-3.6-flash`) through its OpenAI-compatible endpoint, which is the
-default; any endpoint that speaks the OpenAI chat-completions format works
-by setting `LLM_BASE_URL` and `LLM_MODEL`. Only `LLM_API_KEY` is required.
-
-The caption goes to stdout; a one-line summary (feed, snapshot date,
-featured products, attempts) goes to stderr. Flags: `--json` for a
-machine-readable result, `--show-facts` to print the fact sheet, `--dry-run`
-to print the fact sheet and prompts without calling a model (no key
-needed), `--as-of YYYY-MM-DD` to override the date used for promo expiry,
-`--max-attempts N` (default 3). Exit codes: `0` caption, `1` error (bad
-feed, model failure, no valid caption), `2` brief refused for safety.
+The examples were generated with Gemini (`gemini-3.6-flash`) through its
+OpenAI-compatible endpoint, which is the default in `.env.example`; any
+endpoint that speaks the OpenAI chat-completions format works by changing
+`LLM_BASE_URL` and `LLM_MODEL`. `--dry-run` prints the fact sheet and the
+prompts without calling a model. The caption goes to stdout, a one-line
+summary to stderr. Exit codes: 0 caption, 1 error, 2 brief refused.
 
 Promo expiry is judged against the feed's own `snapshot_taken_at` date, not
-the wall clock: a snapshot describes the world when it was taken, and using
-today's date would make the week-1 fixture's promos silently expire.
+today's date, so an old snapshot still means what it meant that week.
 
-## Testing
+## Tests
 
 ```bash
 python -m unittest discover -v      # or: python -m pytest
 ```
 
-94 tests, no API calls (the model is a fake). They cover feed parsing and
-malformed input, the availability rule, promo expiry, the fact sheet
-withholding sold-out promo codes, every validator rule (including a real
-price or promo code attached to the wrong product), retry and give-up
-behaviour, brief refusal, the HTTP client against a local stub server, the
-CLI, and a guard that fails if any week-specific product name or code
-appears in application code.
+37 tests, no API calls (the model is a fake). They cover feed loading, the
+availability rule, the fact sheet, every commercial-fact check (including a
+real price or code attached to the wrong product), sold-out handling, the
+retry loop, the week1/week2 swap, and the command line.
 
 ## Example outputs
 
@@ -176,92 +147,88 @@ Available products in this snapshot: Ethiopia — Guji (Washed), Colombia — Hu
 
 Exit code 2, no model call made.
 
-### What the swap test and the edge case show
+### What this shows
 
-A/B and C/D are each the same code and the same brief run against
-`promotions_feed_week1.json` and then `promotions_feed_week2.json`; the feed
-is a command-line argument and nothing in `app/` changed between runs. In
-A/B the featured product, price and code follow the feed. In C/D the same
-brief flips from a normal caption to a refusal because the stock status
-changed, even though the week-2 promo code looks valid.
+A/B and C/D are the same code and the same brief run against week 1 and
+then week 2; only the `--feed` argument changed. In A/B the featured
+product, price and code follow the feed. In C/D the same brief flips from
+a normal caption to a refusal because the stock status changed, even though
+the week-2 promo code looks valid. Availability is decided by stock status
+and unit count only; promo fields are never consulted for it.
 
-Sold-out safety rests on three checks that would all have to fail:
-availability is decided by stock status and unit count, never by promo
-fields, and sold-out prices and codes are withheld from the prompt; a brief
-that only names sold-out products is refused before the model is called
-(mixed briefs proceed with the available ones and a note); and the validator
-rejects any caption that names a sold-out product (including adjective
-forms like "Guatemalan") or uses a code that isn't an active promo of a
-featured, available product. I chose refusal over silently writing about a
-different coffee: a marketer who asked for a specific product is better
-served by "that's sold out, here's what you can post". The brand kit allows
-truthful "sold out" mentions, but telling those apart from implied
-availability isn't something a program can do reliably, so the rule here is
-stricter: sold-out products are not mentioned at all.
+I chose to refuse rather than quietly write about a different coffee: if a
+teammate asked for a specific product, "that's sold out, here's what you can
+post" is the more useful answer. The brand kit does allow truthful "sold
+out" mentions, but a program can't reliably tell those apart from implied
+availability, so sold-out products are simply never mentioned.
 
 ## Part 1 — Theoretical questions
 
-**Q1. Structuring the brand kit and the feed so updating one never breaks the other.**
-Two files with two jobs, and no code path that reads both for the same
-purpose. The brand kit is prose that goes to the model verbatim; the feed is
-JSON that is parsed into typed objects, reduced to a fact sheet, and injected
-as a labelled data block. Here the brand layer (`brand_kit.md`,
-`brand_rules.json`, `prompts.py`) contains no product facts and the feed
-layer (`feed.py`, `facts.py`, `validator.py`) contains no voice rules, and a
-test greps the application code for week-specific product names. A brand
-edit can't change what is true and a feed edit can't change how we sound.
-The remaining coupling is the feed schema, which is validated strictly at
-load time so a schema change fails loudly.
+**Q1. How would you structure the brand kit and the feed so updating one never breaks the other?**
+Keep them as two separate files with two separate jobs, and never let code
+read both for the same purpose. The brand kit is prose and goes to the model
+as-is; the feed is JSON that gets parsed, filtered and inserted as a
+labelled data block. In this project the feed code (`feed.py`,
+`validator.py`) has no voice rules in it and the brand guide has no product
+facts, and a test fails if any product name from the sample feeds shows up
+in application code. A brand edit can't change what is true, and a feed edit
+can't change how we sound. The only thing they share is the feed's field
+names, which are checked when the file loads so a format change fails
+loudly.
 
-**Q2. Preventing a discount, price, or promo code that isn't in the feed.**
-Two things, neither of which is a prompt. First, restrict what the model can
-see: it only receives prices and promos for products that are sellable now,
-so the most common leak — the bad number was in the context — is closed.
-Second, verify what it wrote: the caption is parsed for `$` amounts,
-percentages and promo-code-shaped tokens, and each must match a fact of the
-product the caption names (the model also declares ids, but the text wins).
-A real price attached to the wrong product fails. Failures go back to the
-model as corrections; after three tries the run fails rather than
-publishing. The prompt still says "don't invent numbers", but nothing
-depends on it.
+**Q2. How would you stop the agent from stating a discount, price, or promo code that isn't in the current feed?**
+Two things, and neither is a prompt. First, filter the feed in normal Python
+before the model sees it: it only receives prices and promos for products
+that are actually sellable, so the most common way to leak a bad number —
+it was sitting in the context — is closed. Second, check what it wrote: the
+caption is scanned for `$` amounts, percentages and code-like tokens, and
+each has to match a fact of the product the caption names. A real price
+attached to the wrong product fails. Failures are sent back to the model
+with the reasons; after three tries the run fails instead of publishing. The
+prompt still says "don't invent numbers", but nothing depends on it.
 
-**Q3. Keeping hundreds of posts a week consistent with the voice.**
-Make the brand context one versioned artifact that every generation reads
-at run time, rather than instructions people paste into prompts. Here that's
-`brand_kit.md` plus `brand_rules.json`; per-platform differences (length,
-hashtags, emoji tolerance) would be small overlays on the same core. Then
-move as many rules as possible from "please remember" to "the validator
-rejects it" — banned phrases, exclamation and emoji limits and health-claim
-vocabulary already are. Keep a few reference posts in the kit as tone
-anchors, and change the voice by changing the file, so drift can be traced
-to a specific edit.
+**Q3. Hundreds of posts a week, different platforms — how do you keep them consistent with the brand voice without a human rewriting instructions each time?**
+Keep one brand guide file that every generation reads at run time, instead
+of instructions people paste into prompts. Platform differences (length,
+hashtags, emoji) would be small overlays on top of the same guide, not
+rewrites. Turn whatever rules can be checked by code into checks — banned
+phrases, exclamation and emoji limits, health words already are — so they
+don't depend on the model remembering. Keep a few example posts in the
+guide so the tone has something concrete to copy, and change the voice by
+editing the file, so drift can be traced to an edit.
 
-**Q4. Continuously evaluating voice and facts without reading every output.**
-Split by how well each thing can be measured. Hard facts (unsupported
-price/discount/code, sold-out mention) and hard style rules (banned words,
-emoji, exclamation marks) are already checked on every run, so log the
-validator's verdicts and watch the rejection rate; a rising rate means the
-model or the feed changed. Soft voice quality can't be asserted, so keep a
-fixed regression set of briefs × feed snapshots, re-run it on every prompt
-or model change, score it with an LLM judge against a short rubric from the
-brand kit, and have a human read a small random sample (a few percent) each
-week. The judge is a trend detector, not a gate.
+**Q4. How would you continuously evaluate voice and facts without reading every output?**
+Facts and mechanical style rules are already checked on every run, so log
+the validator's results and watch the rejection rate; if it climbs, the
+model or the feed changed. Tone can't be asserted by code, so keep a fixed
+set of briefs × feed snapshots, re-run it whenever the prompt or model
+changes, have a second model score the results against a short rubric taken
+from the brand guide, and read a small random sample by hand every week. The
+scoring model is for spotting drift, not for approving individual posts.
 
-**Q5. Where I would deliberately not use an LLM.**
-Everything that is a lookup or a boolean: parsing the feed, deciding whether
-a product is sellable, whether a promo is expired, what a product's price
-is, which code belongs to which product, whether a brief asks about
-something sold out, and whether the caption's numbers match the feed. An
-LLM's failure mode on these is a confident wrong answer; ordinary code
-either gets them right or raises. Here the model does exactly one thing —
-turn a fact sheet and a brief into sentences in the right voice — and
-everything before and after it is deterministic.
+**Q5. Where would you deliberately not use an LLM, and why?**
+Anywhere the answer is a lookup or a yes/no: reading the feed, deciding
+whether a product is sellable, whether a promo has expired, what something
+costs, which code belongs to which product, whether a brief is about
+something sold out, and whether the caption's numbers match the feed. A
+model's failure mode on these is a confident wrong answer; normal code either
+gets them right or raises an error. Here the model does one thing — turn the
+facts and the brief into sentences in the right voice — and everything
+before and after it is plain Python.
 
 ## Limitations
 
-- Numbers are checked per caption, not per sentence. The prompt asks for one product per caption, which makes attribution exact in the normal case; a two-product caption with swapped prices would pass.
-- Regex catches formatted values ("$19", "19 dollars", "15%", code-like tokens), not prose ("nineteen bucks"). Unit counts and dates in the caption are not verified. Any percentage is treated as a discount, so "100% compostable" would be rejected and rewritten — a deliberate false positive.
-- Product mentions are keyword-based (distinctive words from name and origin, plus short adjective forms); "the washed one" is not detected. The "new" check only looks for the usual phrasings.
-- Voice is enforced only where it is mechanical; tone itself is left to the model. Competitor mentions aren't checked because no competitor list exists.
-- The agent trusts the snapshot it is given; feed freshness is the caller's problem. Unknown stock statuses are treated as unavailable rather than raising.
-- The client speaks the OpenAI chat-completions format; a provider without such an endpoint would need a second small client with the same `complete(system, user)` method.
+- Numbers are checked per caption, not per sentence, so a caption about two
+  products with their prices swapped would pass. The prompt asks for one
+  product per caption, which is the normal case.
+- The checks are regexes: "$19", "19 dollars", "15%" and code-like tokens
+  are caught; "nineteen bucks" is not. Unit counts and dates in the caption
+  aren't verified. Any percentage is treated as a discount, so "100%
+  compostable" would be rejected and rewritten.
+- Product mentions are matched on the distinctive words of the name and
+  origin (plus forms like "Kenyan"); "the washed one" wouldn't be detected.
+  The "new" check only looks for the usual phrasings.
+- Tone is the model's job, guided by the brand kit; only the mechanical
+  rules are enforced. Competitor mentions aren't checked.
+- The agent trusts the snapshot it is given. Unknown stock statuses are
+  treated as unavailable.
