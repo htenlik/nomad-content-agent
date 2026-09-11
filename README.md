@@ -68,7 +68,7 @@ today's date, so an old snapshot still means what it meant that week.
 python -m unittest discover -v      # or: python -m pytest
 ```
 
-37 tests, no API calls (the model is a fake). They cover feed loading, the
+36 tests, no API calls (the model is a fake). They cover feed loading, the
 availability rule, the fact sheet, every commercial-fact check (including a
 real price or code attached to the wrong product), sold-out handling, the
 retry loop, the week1/week2 swap, and the command line.
